@@ -471,6 +471,22 @@ Round 003 的 `multi_thread_report.md` / `multi_thread_summary.json` 同样通�
 - **风控：用户手动通过 2 次人机验证**；worker 未记录 `risk_control`/0 字节，未发现数据损失；生产需验证码检测/暂停/人工值守。
 - 入库：`comment=27,211`（23,012 top_level + 4,199 reply）、`quality_metric=841`、`worker_job=17`；回复 raw/state 留在 Windows 本地。
 
+### 4.11 `wrapper_not_ready` 的代码处理（2026-11-04 修复）
+
+之前：`wrapper_ready(page, timeout_s=30)` 等 30 秒；仍是 native 就 `global_stop` 并 `break`，一个视频会中断整个 batch。多账号 round 就因此在 `7241526932624477477` 停掉，剩余 51 threads 未跑。
+
+现在 `reply_worker.py` 增加：
+
+- `--wrapper-timeout`：单次等待秒数，默认 45；
+- `--wrapper-retries`：最多尝试次数，默认 2（首次 + 1 次重开页面）；
+- `--wrapper-policy skip|stop`：默认 `skip`；
+- `ensure_wrapper()`：失败后关闭页面、重新 `open_video`、再次检查；
+- `job_failures`：写进 `worker_summary.json` 和 `worker_report.md`，列出失败视频、thread 数、reload 次数；
+- `skip` 模式下单个视频失败不再中断后续 jobs，最终 status 为 `partial`；Linux 只需为 `job_failures` 中的视频补采。
+
+mock 测试已验证：首次 native → 重开页面 → ready；`retries=1` 时不会重开。  
+注意：这只能提高恢复能力，不能保证抖音页面一定安装 wrapper；如果仍失败，保留 `blocked/partial` 并人工预检。
+
 ---
 
 ## 5. 对现有文档的影响

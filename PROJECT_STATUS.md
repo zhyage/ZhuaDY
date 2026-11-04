@@ -60,6 +60,13 @@
 5. ✅ 导入/合并/导出 + 质量报告完成（`MULTI_ROUND_REPORT.md`）。
 6. 下一步：决定是否扩到更多账号、是否做视频分析，或进入 LLD/自动化。
 
+## 4.1 Worker wrapper 修复（2026-11-04）
+
+- `reply_worker.py` 已增加 `--wrapper-timeout`、`--wrapper-retries`、`--wrapper-policy`。
+- 失败会重开视频页；默认 `skip`，单个视频 wrapper_not_ready 不再中断整批。
+- `worker_summary.json` / `worker_report.md` 增加 `job_failures`，Linux 只补失败视频。
+- 已有数据不受影响；后续 round 使用新 worker。
+
 ## 5. 阻塞/依赖
 
 - Windows 机器 + Chrome/CDP + 登录态；验证码需要人工。

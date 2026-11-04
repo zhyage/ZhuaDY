@@ -210,6 +210,40 @@ def wrapper_ready(page, timeout_s: int = 30) -> tuple[bool, dict]:
         return False, {"error": repr(exc)}
 
 
+def ensure_wrapper(
+    context,
+    page,
+    aweme_id: str,
+    timeout_s: int,
+    retries: int,
+) -> tuple[bool, object, dict, int]:
+    """Wait for the page's fetch wrapper, reopening the video page on failure.
+
+    Returns (ready, page, last_info, reloads). The returned page is the page
+    that should be used for subsequent requests; it may differ from the input.
+    """
+    attempts = max(1, int(retries))
+    last_info: dict = {}
+    reloads = 0
+    for attempt in range(1, attempts + 1):
+        ready, last_info = wrapper_ready(page, timeout_s=timeout_s)
+        if ready:
+            return True, page, last_info, reloads
+        if attempt >= attempts:
+            break
+        log(
+            f"video {aweme_id}: wrapper not ready; reopening "
+            f"({attempt}/{attempts - 1} reloads)"
+        )
+        reloads += 1
+        try:
+            page.close()
+        except Exception:
+            pass
+        page, _author = open_video(context, aweme_id)
+    return False, page, last_info, reloads
+
+
 def load_raw_comments(raw_dir: Path) -> tuple[dict[str, dict], dict[str, str]]:
     comments: dict[str, dict] = {}
     page_by_cid: dict[str, str] = {}
@@ -568,7 +602,9 @@ def write_outputs(
     notes: list[str],
     sample_rows: int,
     normalized_paths: list[Path],
+    job_failures: list[dict] | None = None,
 ) -> None:
+    job_failures = job_failures or []
     total_unique = sum(int(t.get("unique") or 0) for t in threads)
     total_fetched = sum(int(t.get("fetched") or 0) for t in threads)
     total_orphans = sum(int(t.get("orphan_edges") or 0) for t in threads)
@@ -594,6 +630,7 @@ def write_outputs(
             "normalized_rows": sum(int(t.get("normalized_rows_added") or 0) for t in threads),
         },
         "errors": errors,
+        "job_failures": job_failures,
         "notes": notes,
     }
     save_json(out / "worker_summary.json", summary)
@@ -625,6 +662,14 @@ def write_outputs(
     if errors:
         lines += ["", "## 错误", ""]
         lines += [f"- `{e}`" for e in errors]
+    if job_failures:
+        lines += ["", "## 未完成视频", ""]
+        for f in job_failures:
+            lines.append(
+                f"- `{f.get('aweme_id')}` ({f.get('selection')}): "
+                f"{f.get('reason')}; threads={f.get('threads')}; "
+                f"reloads={f.get('reloads')}"
+            )
     lines += [
         "",
         "> raw 页在 `raw/`，normalized 在 `normalized/`；`normalized_sample.jsonl` 只保留前几行并截断 text。",
@@ -737,6 +782,12 @@ def main() -> int:
     parser.add_argument("--count", type=int, default=50)
     parser.add_argument("--max-pages", type=int, default=5)
     parser.add_argument("--fetch-timeout", type=int, default=20_000)
+    parser.add_argument("--wrapper-timeout", type=int, default=45)
+    parser.add_argument("--wrapper-retries", type=int, default=2)
+    parser.add_argument(
+        "--wrapper-policy", choices=("skip", "stop"), default="skip",
+        help="skip a video with wrapper_not_ready, or stop the whole batch",
+    )
     parser.add_argument("--request-min", type=int, default=1_500)
     parser.add_argument("--request-max", type=int, default=3_000)
     parser.add_argument("--thread-min", type=int, default=4_000)
@@ -774,6 +825,8 @@ def main() -> int:
         "count=50; cursor comes from the response, not previous+n",
         "large-thread gap/orphans are recorded, not retried",
         "orphan rows keep depth=null; is_author uses sec_uid",
+        f"wrapper wait={args.wrapper_timeout}s retries={args.wrapper_retries} "
+        f"policy={args.wrapper_policy}",
         f"author_hash salt: {'set' if salt else 'not set'} "
         f"(source: {'file' if args.hash_salt_file else 'env'})",
     ]
@@ -787,6 +840,7 @@ def main() -> int:
 
     threads: list[dict] = []
     normalized_paths: list[Path] = []
+    job_failures: list[dict] = []
     global_stop: str | None = None
 
     with sync_playwright() as pw:
@@ -810,12 +864,30 @@ def main() -> int:
                 global_stop = "login_or_captcha"
                 page.close()
                 break
-            ready, info = wrapper_ready(page, timeout_s=30)
+            ready, page, info, reloads = ensure_wrapper(
+                context, page, aweme_id, args.wrapper_timeout, args.wrapper_retries
+            )
             if not ready:
-                errors.append(f"video {aweme_id}: wrapper not ready")
-                global_stop = "wrapper_not_ready"
+                msg = (
+                    f"video {aweme_id}: wrapper not ready after "
+                    f"{args.wrapper_retries} attempt(s), reloads={reloads}"
+                )
+                errors.append(msg)
+                job_failures.append(
+                    {
+                        "aweme_id": aweme_id,
+                        "selection": job.get("selection"),
+                        "threads": len(job.get("threads") or []),
+                        "reason": "wrapper_not_ready",
+                        "reloads": reloads,
+                    }
+                )
+                if args.wrapper_policy == "stop":
+                    global_stop = "wrapper_not_ready"
+                    page.close()
+                    break
                 page.close()
-                break
+                continue
             try:
                 params = page_params(page, base_params)
             except Exception as exc:  # noqa: BLE001
@@ -857,13 +929,13 @@ def main() -> int:
                 break
 
     status = "blocked" if global_stop in ("login_or_captcha", "wrapper_not_ready") else (
-        "partial" if global_stop or any(
+        "partial" if global_stop or job_failures or any(
             t.get("stop_reason") not in (None, "complete") for t in threads
         ) else "success"
     )
     write_outputs(
         out_root, run_id, status, started_at, threads, errors, notes,
-        args.sample_rows, normalized_paths,
+        args.sample_rows, normalized_paths, job_failures,
     )
     log(f"done: {out_root.resolve()} status={status}")
     log("send back worker_report.md, worker_summary.json, normalized_sample.jsonl")
