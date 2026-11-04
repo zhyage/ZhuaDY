@@ -1,0 +1,57 @@
+# Local-only collaboration / agent notes
+CLAUDE.md
+materialFromMe.md
+agentsCooperation.md
+
+# Spike analysis with comment-level IDs / IP labels
+spike/windows-reply/ANALYSIS.md
+
+# Secrets / credentials
+.secrets/
+.env
+.env.*
+**/.env
+**/debug*.md
+**/cookies*.json
+
+# Research data / generated output
+data/
+exports/
+spike/out/
+spike/resultFromWindows/
+spike/resultFromWindows/handoff/
+spike/resultFromWindows/*.tgz
+spike/windows-reply-kit.zip
+
+# Media
+*.mp4
+*.part
+*.mov
+*.mkv
+*.avi
+
+# Python
+**/__pycache__/
+*.py[cod]
+**/.venv/
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Logs / raw captures / local state
+**/out/
+**/state/
+*.log
+*.har
+*.zip
+*.tgz
+
+# Third-party / nested repositories kept locally
+Douyin_TikTok_Download_API/
+anotherImplement/
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/
