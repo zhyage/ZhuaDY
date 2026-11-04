@@ -32,7 +32,8 @@
 
 - 5 个线程合计缺 9 条；其中一条平台 `expected=1, unique=0`。
 - orphan edges：8；depth null：8；最大 depth：10。
-- `is_author=true`：7 条，全部带 `作者` 标签。
+- `is_author=true`：一级评论 2 条、回复 7 条；回复全部带 `作者` 标签。
+- 修正：一级评论 `is_author` 原先固定按绍兴 sec_uid 判断；已改为按每条视频的目标账号判断，并从 raw 重算/回填 2 条。导出与 DB 已更新。
 - `ip_province`：一级 4,889/5,182（94.3%）；回复 1,324/1,362（97.2%）。
 - `author_hash` 100% 非空；salt 与一级评论一致。
 

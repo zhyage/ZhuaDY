@@ -100,7 +100,7 @@ def raw_token(raw: dict, key: str, default=None):
     return value if value not in (None, "") else default
 
 
-def comment_row(item: dict, raw: dict, aweme_id: str, run_id: str, salt: str, raw_page: str) -> dict:
+def comment_row(item: dict, raw: dict, aweme_id: str, run_id: str, salt: str, raw_page: str, target_sec_uid: str) -> dict:
     cid = str(item.get("comment_id") or raw.get("cid") or "")
     user = raw.get("user") or {}
     sec = user.get("sec_uid") or (item.get("author") or {}).get("sec_uid") or (item.get("author") or {}).get("uid")
@@ -133,7 +133,7 @@ def comment_row(item: dict, raw: dict, aweme_id: str, run_id: str, salt: str, ra
         "is_pinned": bool(item.get("is_pinned")),
         "is_author_liked": bool(item.get("is_author_liked")),
         "ip_province": raw.get("ip_label"),
-        "is_author": (sec == TARGET_SEC_UID) if sec else None,
+        "is_author": (sec == target_sec_uid) if sec else None,
         "is_thread_author": "",
         "author_hash": author_hash(sec, salt),
         "hash_version": "v1",
@@ -194,6 +194,7 @@ def fetch_video(
     count: int,
     max_pages: int,
     sleep: float,
+    target_sec_uid: str,
 ) -> dict:
     out_dir = pilot_root / "comments" / aweme_id
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -232,7 +233,7 @@ def fetch_video(
         fetched += len(items)
         for item in items:
             raw = item.get("raw") or {}
-            row = comment_row(item, raw, aweme_id, run_id, salt, raw_page)
+            row = comment_row(item, raw, aweme_id, run_id, salt, raw_page, target_sec_uid)
             cid = row["comment_id"]
             if not cid or cid in seen:
                 continue
@@ -320,6 +321,7 @@ def main() -> int:
     parser.add_argument("--max-pages", type=int, default=15)
     parser.add_argument("--sleep", type=float, default=2.0)
     parser.add_argument("--max-videos", type=int, default=0)
+    parser.add_argument("--target-sec-uid", default=TARGET_SEC_UID)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--out-data", default="data")
     args = parser.parse_args()
@@ -358,9 +360,11 @@ def main() -> int:
                 states.append(state)
                 continue
         try:
+            target_sec_uid = video.get("account_id") or video.get("author_sec_uid") or args.target_sec_uid
             result = fetch_video(
                 session, args.base, key, args.run_id, aweme_id, platform_count,
                 salt, raw_root, pilot_root, args.count, args.max_pages, args.sleep,
+                target_sec_uid,
             )
         except Exception as exc:  # noqa: BLE001
             log(f"{aweme_id} exception: {exc}")
